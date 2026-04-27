@@ -2,6 +2,8 @@
 
 내부 정책/지침과 외부 법령을 함께 검토해서, 현재 회사 정책에 무엇을 추가해야 하는지 또는 어떤 내용이 불필요한지 검토하기 위한 시스템입니다.
 
+배포는 `main` 브랜치 push 시 GitHub Actions로 실행됩니다.
+
 프론트엔드는 `React + Vite`, 백엔드는 `Supabase(Auth, Postgres, Storage, Edge Functions)`, AI 분석은 `OpenAI API`를 사용합니다.
 
 이 시스템은 법률 자문 시스템이 아닙니다.  
