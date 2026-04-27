@@ -189,6 +189,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
   const [reviewHistoryPage, setReviewHistoryPage] = useState(1);
   const [aiHistoryLoadRequest, setAiHistoryLoadRequest] = useState<{
     requestId: number;
+    aiReportHistoryId?: string | null;
     selectionSummary: string;
     selectionCounts: {
       leftDocumentCount: number;
@@ -197,6 +198,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
     };
   } | null>(null);
   const [pendingAiOnlyReviewHistoryId, setPendingAiOnlyReviewHistoryId] = useState<string | null>(null);
+  const [pendingAiOnlyReportHistoryId, setPendingAiOnlyReportHistoryId] = useState<string | null>(null);
   const [openAiSettings, setOpenAiSettings] = useState<OpenAiSettings>({
     apiKey: "",
     model: DEFAULT_OPENAI_MODEL,
@@ -620,6 +622,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       setComparisonRuns([]);
       setReviewExecutionHistory([]);
       setPendingAiOnlyReviewHistoryId(null);
+      setPendingAiOnlyReportHistoryId(null);
       setSelectedDocumentId(null);
       setCheckedDocumentIds([]);
       setComparisonTargetDocumentIds([]);
@@ -900,7 +903,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
 
       let aiHistorySaveError: string | null = null;
       try {
-        await saveAiReportHistoryEntry({
+        const savedAiReport = await saveAiReportHistoryEntry({
           title: buildAiReportHistoryTitle({
             leftDocumentCount: comparisonTargetDocumentIds.length,
             rightDocumentCount: comparisonReferenceDocumentIds.length,
@@ -918,6 +921,9 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
           },
           guidance: finalGuidance,
         });
+        if (selectedLawVersionIds.length === 0) {
+          setPendingAiOnlyReportHistoryId(savedAiReport.id);
+        }
       } catch (error) {
         aiHistorySaveError =
           error instanceof Error ? error.message : "AI 리포트 이력 저장에 실패했습니다.";
@@ -967,7 +973,12 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
   ]);
 
   useEffect(() => {
-    if (!pendingAiOnlyReviewHistoryId || !comparisonAnalysisState.aiGuidance || selectedLawVersionIds.length > 0) {
+    if (
+      !pendingAiOnlyReviewHistoryId ||
+      !pendingAiOnlyReportHistoryId ||
+      !comparisonAnalysisState.aiGuidance ||
+      selectedLawVersionIds.length > 0
+    ) {
       return;
     }
 
@@ -976,6 +987,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
     updateReviewExecutionHistoryStatus({
       entryId: pendingAiOnlyReviewHistoryId,
       resultStatus: "ai_completed",
+      aiReportHistoryId: pendingAiOnlyReportHistoryId,
     })
       .then((updatedEntry) => {
         if (cancelled) {
@@ -986,6 +998,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
           current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)),
         );
         setPendingAiOnlyReviewHistoryId(null);
+        setPendingAiOnlyReportHistoryId(null);
       })
       .catch(() => {
         if (cancelled) {
@@ -1000,12 +1013,18 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
           ),
         );
         setPendingAiOnlyReviewHistoryId(null);
+        setPendingAiOnlyReportHistoryId(null);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [comparisonAnalysisState.aiGuidance, pendingAiOnlyReviewHistoryId, selectedLawVersionIds.length]);
+  }, [
+    comparisonAnalysisState.aiGuidance,
+    pendingAiOnlyReportHistoryId,
+    pendingAiOnlyReviewHistoryId,
+    selectedLawVersionIds.length,
+  ]);
 
   useEffect(() => {
     const hasSelectionContext =
@@ -1830,6 +1849,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
 
     if (selectedLawVersionIds.length === 0) {
       setAnalysisRequestKey((current) => current + 1);
+      setPendingAiOnlyReportHistoryId(null);
       let reviewHistorySaveWarning: string | null = null;
       try {
         const savedHistoryEntry = await saveReviewExecutionHistoryEntry({
@@ -1863,6 +1883,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
 
     setAnalysisRequestKey((current) => current + 1);
     setPendingAiOnlyReviewHistoryId(null);
+    setPendingAiOnlyReportHistoryId(null);
 
     setAppNotice({
       tone: "info",
@@ -1906,6 +1927,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
           resultStatus: "comparison_completed",
         });
         setPendingAiOnlyReviewHistoryId(null);
+        setPendingAiOnlyReportHistoryId(null);
         setReviewExecutionHistory((current) => [savedHistoryEntry, ...current].slice(0, 50));
       } catch (error) {
         reviewHistorySaveWarning =
@@ -2859,6 +2881,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
                                         onClick={() => {
                                           setAiHistoryLoadRequest({
                                             requestId: Date.now(),
+                                            aiReportHistoryId: entry.aiReportHistoryId,
                                             selectionSummary: getSelectionSummary(
                                               entry.targetTitles.length,
                                               entry.referenceTitles.length,
@@ -3220,6 +3243,7 @@ function createReviewExecutionHistoryEntry(input: {
     targetTitles: input.targetTitles,
     referenceTitles: input.referenceTitles,
     comparisonRunIds: [],
+    aiReportHistoryId: null,
     resultStatus: "pending",
   };
 }

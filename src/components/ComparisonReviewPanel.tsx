@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 import {
   classifyRevision,
   deleteAiReportHistoryEntry,
+  getAiReportHistoryEntry,
   getAggregatedComparisonReview,
   getComparisonReview,
   listAiReportHistory,
@@ -9,6 +10,7 @@ import {
 } from "../lib/documentService";
 import type {
   AiReportHistoryEntry,
+  AiReportHistorySummary,
   AiComparisonReport,
   AiGroupReport,
   AiRevisionGuidance,
@@ -26,6 +28,7 @@ interface ComparisonReviewPanelProps {
   viewMode?: "results" | "history";
   autoLoadHistoryRequest?: {
     requestId: number;
+    aiReportHistoryId?: string | null;
     selectionSummary: string;
     selectionCounts: AiReportHistoryEntry["selectionCounts"];
   } | null;
@@ -91,11 +94,11 @@ export function ComparisonReviewPanel({
   const [progressNow, setProgressNow] = useState(() => Date.now());
   const [isLoading, setIsLoading] = useState(false);
   const [isClassifying, setIsClassifying] = useState(false);
-  const [savedHistory, setSavedHistory] = useState<AiReportHistoryEntry[]>([]);
+  const [savedHistory, setSavedHistory] = useState<AiReportHistorySummary[]>([]);
   const [isSavedHistoryLoading, setIsSavedHistoryLoading] = useState(false);
   const [loadedHistoryEntry, setLoadedHistoryEntry] = useState<AiReportHistoryEntry | null>(null);
-  const savedHistoryRef = useRef<AiReportHistoryEntry[]>([]);
-  const savedHistoryLoadPromiseRef = useRef<Promise<AiReportHistoryEntry[]> | null>(null);
+  const savedHistoryRef = useRef<AiReportHistorySummary[]>([]);
+  const savedHistoryLoadPromiseRef = useRef<Promise<AiReportHistorySummary[]> | null>(null);
   const handledAutoLoadRequestIdRef = useRef<number | null>(null);
   const selectionSummary = getSelectionSummary(
     selectedDocumentIds.length,
@@ -179,13 +182,18 @@ export function ComparisonReviewPanel({
       return;
     }
 
-    const bestEntry = findBestHistoryEntry(savedHistory, selectionSummary, selectionCounts);
-    if (!bestEntry) {
+    const bestEntrySummary = findBestHistoryEntry(savedHistory, selectionSummary, selectionCounts);
+    if (!bestEntrySummary) {
       return;
     }
 
-    setLoadedHistoryEntry(bestEntry);
-    emitStatus(`저장된 AI 리포트 이력을 자동으로 불러왔습니다. (${formatSavedHistoryTimestamp(bestEntry.createdAt)})`);
+    void getAiReportHistoryEntry(bestEntrySummary.id).then((entry) => {
+      if (!entry) {
+        return;
+      }
+      setLoadedHistoryEntry(entry);
+      emitStatus(`저장된 AI 리포트 이력을 자동으로 불러왔습니다. (${formatSavedHistoryTimestamp(entry.createdAt)})`);
+    });
   }, [
     analysisState.aiGuidance,
     emitStatus,
@@ -207,21 +215,24 @@ export function ComparisonReviewPanel({
     handledAutoLoadRequestIdRef.current = autoLoadHistoryRequest.requestId;
 
     let cancelled = false;
+    setIsSavedHistoryLoading(true);
 
-    const loadEntries = loadSavedHistory();
+    const loadEntry = autoLoadHistoryRequest.aiReportHistoryId
+      ? getAiReportHistoryEntry(autoLoadHistoryRequest.aiReportHistoryId)
+      : loadSavedHistory().then((entries) => {
+          const summary = findExactHistoryEntry(
+            entries,
+            autoLoadHistoryRequest.selectionSummary,
+            autoLoadHistoryRequest.selectionCounts,
+          ) ?? entries[0] ?? null;
+          return summary ? getAiReportHistoryEntry(summary.id) : null;
+        });
 
-    loadEntries
-      .then((entries) => {
+    loadEntry
+      .then((entry) => {
         if (cancelled) {
           return;
         }
-
-        const exactEntry = findExactHistoryEntry(
-          entries,
-          autoLoadHistoryRequest.selectionSummary,
-          autoLoadHistoryRequest.selectionCounts,
-        );
-        const entry = exactEntry ?? entries[0] ?? null;
 
         if (!entry) {
           emitStatus("저장된 AI 리포트 이력이 없습니다.");
@@ -230,7 +241,7 @@ export function ComparisonReviewPanel({
 
         setLoadedHistoryEntry(entry);
         emitStatus(
-          exactEntry
+          autoLoadHistoryRequest.aiReportHistoryId
             ? `검토 이력에서 연결된 AI 리포트를 불러왔습니다. (${formatSavedHistoryTimestamp(entry.createdAt)})`
             : `정확히 일치하는 AI 리포트가 없어 최신 저장 리포트를 불러왔습니다. (${formatSavedHistoryTimestamp(entry.createdAt)})`,
         );
@@ -337,16 +348,18 @@ export function ComparisonReviewPanel({
         selectionCounts,
         guidance: analysisState.aiGuidance,
       });
-      setSavedHistory((current) => [entry, ...current].slice(0, 50));
+      const { guidance: _guidance, ...summaryEntry } = entry;
+      setSavedHistory((current) => [summaryEntry, ...current].slice(0, 50));
       emitStatus("현재 AI 비교 리포트를 DB 이력에 저장했습니다.");
     } catch (error) {
       emitStatus(error instanceof Error ? error.message : "AI 리포트 저장에 실패했습니다.");
     }
   }
 
-  function handleLoadSavedReport(entryId: string) {
-    const entry = savedHistory.find((item) => item.id === entryId);
+  async function handleLoadSavedReport(entryId: string) {
+    const entry = await getAiReportHistoryEntry(entryId);
     if (!entry) {
+      emitStatus("선택한 AI 리포트 이력을 찾지 못했습니다.");
       return;
     }
 
@@ -808,7 +821,7 @@ function AiGuidancePanel(input: {
 }
 
 function SavedAnalysisHistorySection(input: {
-  entries: AiReportHistoryEntry[];
+  entries: AiReportHistorySummary[];
   isLoading?: boolean;
   onLoad: (entryId: string) => void;
   onDelete: (entryId: string) => void;
@@ -848,7 +861,7 @@ function SavedAnalysisHistorySection(input: {
                 <div className="ai-report-history-meta">
                   <span>대상 {entry.selectionCounts.leftDocumentCount}</span>
                   <span>기준 {entry.selectionCounts.rightDocumentCount + entry.selectionCounts.rightLawCount}</span>
-                  <span>호출 {entry.guidance.api_call_count}</span>
+                  <span>호출 열람 시 확인</span>
                 </div>
                 <div className="ai-report-history-actions">
                   <button type="button" className="button ghost" onClick={() => input.onLoad(entry.id)}>
@@ -1236,8 +1249,13 @@ function buildSavedHistoryTitle(selectionCounts: AiReportHistoryEntry["selection
   return `비교 대상 ${selectionCounts.leftDocumentCount}건 · 기준 문서 ${selectionCounts.rightDocumentCount}건 · 법령 ${selectionCounts.rightLawCount}건`;
 }
 
+type AiReportHistoryMatchCandidate = Pick<
+  AiReportHistorySummary,
+  "id" | "selectionSummary" | "selectionCounts" | "createdAt"
+>;
+
 function findBestHistoryEntry(
-  entries: AiReportHistoryEntry[],
+  entries: AiReportHistoryMatchCandidate[],
   selectionSummary: string,
   selectionCounts: AiReportHistoryEntry["selectionCounts"],
 ) {
@@ -1247,7 +1265,7 @@ function findBestHistoryEntry(
 }
 
 function findExactHistoryEntry(
-  entries: AiReportHistoryEntry[],
+  entries: AiReportHistoryMatchCandidate[],
   selectionSummary: string,
   selectionCounts: AiReportHistoryEntry["selectionCounts"],
 ) {

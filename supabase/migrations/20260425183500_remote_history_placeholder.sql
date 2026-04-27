@@ -1,0 +1,3 @@
+-- Placeholder for a migration already recorded in the linked Supabase project.
+-- The original SQL is not present in this local checkout; keep this version so
+-- subsequent migrations can be pushed without altering the remote schema.

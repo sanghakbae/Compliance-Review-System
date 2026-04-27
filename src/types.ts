@@ -59,6 +59,7 @@ export interface ReviewExecutionHistoryEntry {
   targetTitles: string[];
   referenceTitles: string[];
   comparisonRunIds: string[];
+  aiReportHistoryId: string | null;
   resultStatus: "pending" | "ai_completed" | "comparison_completed";
 }
 
@@ -331,10 +332,16 @@ export interface SavedAnalysisHistoryEntry {
   fileName?: string;
   selectionSummary: string;
   selectionCounts: AnalysisSelectionCounts;
+  guidance?: AiRevisionGuidance;
+}
+
+export interface AiReportHistoryEntry extends SavedAnalysisHistoryEntry {
   guidance: AiRevisionGuidance;
 }
 
-export interface AiReportHistoryEntry extends SavedAnalysisHistoryEntry {}
+export interface AiReportHistorySummary extends SavedAnalysisHistoryEntry {
+  guidance?: undefined;
+}
 
 export interface AiRevisionStageResult {
   stage: AiRevisionAnalysisStage;

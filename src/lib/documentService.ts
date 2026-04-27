@@ -9,6 +9,7 @@ import type {
   AiRevisionStageResult,
   AiRevisionPromptOverrides,
   AiReportHistoryEntry,
+  AiReportHistorySummary,
   PromptSlotList,
   AggregatedComparisonResultRecord,
   AiRevisionAnalysisStage,
@@ -72,6 +73,7 @@ interface ReviewExecutionHistoryRow {
   target_titles: string[] | null;
   reference_titles: string[] | null;
   comparison_run_ids: string[] | null;
+  ai_report_history_id?: string | null;
   result_status: ReviewExecutionHistoryEntry["resultStatus"] | null;
   created_at: string;
 }
@@ -81,7 +83,7 @@ interface AiReportHistoryRow {
   title: string;
   selection_summary: string;
   selection_counts: unknown;
-  guidance: unknown;
+  guidance?: unknown;
   created_at: string;
 }
 
@@ -808,7 +810,7 @@ export async function listReviewExecutionHistory(): Promise<ReviewExecutionHisto
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("policy_review_execution_history")
-    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, result_status, created_at")
+    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, ai_report_history_id, result_status, created_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -822,6 +824,7 @@ export async function listReviewExecutionHistory(): Promise<ReviewExecutionHisto
     targetTitles: row.target_titles ?? [],
     referenceTitles: row.reference_titles ?? [],
     comparisonRunIds: row.comparison_run_ids ?? [],
+    aiReportHistoryId: row.ai_report_history_id ?? null,
     resultStatus: row.result_status ?? ((row.comparison_run_ids?.length ?? 0) > 0 ? "comparison_completed" : "pending"),
   }));
 }
@@ -831,6 +834,7 @@ export async function saveReviewExecutionHistoryEntry(input: {
   targetTitles: string[];
   referenceTitles: string[];
   comparisonRunIds: string[];
+  aiReportHistoryId?: string | null;
   resultStatus?: ReviewExecutionHistoryEntry["resultStatus"];
 }) {
   const session = await ensureAuthenticatedSession();
@@ -844,10 +848,11 @@ export async function saveReviewExecutionHistoryEntry(input: {
       target_titles: input.targetTitles,
       reference_titles: input.referenceTitles,
       comparison_run_ids: input.comparisonRunIds,
+      ai_report_history_id: input.aiReportHistoryId ?? null,
       result_status:
         input.resultStatus ?? (input.comparisonRunIds.length > 0 ? "comparison_completed" : "pending"),
     })
-    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, result_status, created_at")
+    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, ai_report_history_id, result_status, created_at")
     .single();
 
   if (error || !data) {
@@ -862,6 +867,7 @@ export async function saveReviewExecutionHistoryEntry(input: {
     targetTitles: row.target_titles ?? [],
     referenceTitles: row.reference_titles ?? [],
     comparisonRunIds: row.comparison_run_ids ?? [],
+    aiReportHistoryId: row.ai_report_history_id ?? null,
     resultStatus: row.result_status ?? ((row.comparison_run_ids?.length ?? 0) > 0 ? "comparison_completed" : "pending"),
   } satisfies ReviewExecutionHistoryEntry;
 }
@@ -869,6 +875,7 @@ export async function saveReviewExecutionHistoryEntry(input: {
 export async function updateReviewExecutionHistoryStatus(input: {
   entryId: string;
   resultStatus: ReviewExecutionHistoryEntry["resultStatus"];
+  aiReportHistoryId?: string | null;
 }) {
   await ensureAuthenticatedSession();
   const supabase = getSupabaseClient();
@@ -876,9 +883,10 @@ export async function updateReviewExecutionHistoryStatus(input: {
     .from("policy_review_execution_history")
     .update({
       result_status: input.resultStatus,
+      ...(input.aiReportHistoryId !== undefined ? { ai_report_history_id: input.aiReportHistoryId } : {}),
     })
     .eq("id", input.entryId)
-    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, result_status, created_at")
+    .select("id, reviewer_email, target_titles, reference_titles, comparison_run_ids, ai_report_history_id, result_status, created_at")
     .single();
 
   if (error || !data) {
@@ -893,26 +901,44 @@ export async function updateReviewExecutionHistoryStatus(input: {
     targetTitles: row.target_titles ?? [],
     referenceTitles: row.reference_titles ?? [],
     comparisonRunIds: row.comparison_run_ids ?? [],
+    aiReportHistoryId: row.ai_report_history_id ?? null,
     resultStatus: row.result_status ?? ((row.comparison_run_ids?.length ?? 0) > 0 ? "comparison_completed" : "pending"),
   } satisfies ReviewExecutionHistoryEntry;
 }
 
-export async function listAiReportHistory(): Promise<AiReportHistoryEntry[]> {
+export async function listAiReportHistory(): Promise<AiReportHistorySummary[]> {
   await ensureAuthenticatedSession();
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("policy_ai_report_history")
-    .select("id, title, selection_summary, selection_counts, guidance, created_at")
-    .order("created_at", { ascending: false });
+    .select("id, title, selection_summary, selection_counts, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   if (error) {
     throwAuthAwareError(error.message);
   }
 
   return ((data ?? []) as AiReportHistoryRow[]).flatMap((row) => {
-    const entry = normalizeAiReportHistoryRow(row);
+    const entry = normalizeAiReportHistorySummaryRow(row);
     return entry ? [entry] : [];
   });
+}
+
+export async function getAiReportHistoryEntry(entryId: string): Promise<AiReportHistoryEntry | null> {
+  await ensureAuthenticatedSession();
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("policy_ai_report_history")
+    .select("id, title, selection_summary, selection_counts, guidance, created_at")
+    .eq("id", entryId)
+    .maybeSingle();
+
+  if (error) {
+    throwAuthAwareError(error.message);
+  }
+
+  return data ? normalizeAiReportHistoryRow(data as AiReportHistoryRow) : null;
 }
 
 export async function saveAiReportHistoryEntry(input: {
@@ -1987,10 +2013,26 @@ function normalizeAiRevisionStageResult(input: unknown): AiRevisionStageResult {
 }
 
 function normalizeAiReportHistoryRow(row: AiReportHistoryRow): AiReportHistoryEntry | null {
-  const selectionCounts = normalizeAnalysisSelectionCounts(row.selection_counts);
-  const guidance = normalizeAiRevisionGuidance(row.guidance);
+  const summary = normalizeAiReportHistorySummaryRow(row);
+  if (!summary) {
+    return null;
+  }
 
-  if (!selectionCounts || !guidance) {
+  const guidance = normalizeAiRevisionGuidance(row.guidance);
+  if (!guidance) {
+    return null;
+  }
+
+  return {
+    ...summary,
+    guidance,
+  };
+}
+
+function normalizeAiReportHistorySummaryRow(row: AiReportHistoryRow): AiReportHistorySummary | null {
+  const selectionCounts = normalizeAnalysisSelectionCounts(row.selection_counts);
+
+  if (!selectionCounts) {
     return null;
   }
 
@@ -2000,7 +2042,6 @@ function normalizeAiReportHistoryRow(row: AiReportHistoryRow): AiReportHistoryEn
     title: row.title,
     selectionSummary: row.selection_summary,
     selectionCounts,
-    guidance,
   };
 }
 
