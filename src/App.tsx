@@ -286,6 +286,14 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
 
   function isAllowedEmailDomain(email?: string | null) {
     const normalizedEmail = email?.trim().toLowerCase() ?? "";
+    if (!normalizedEmail) {
+      return false;
+    }
+    // Exact-email allowlist takes precedence over domain matching (so a single
+    // consumer Gmail account can be permitted). Configured via VITE_ALLOWED_EMAILS.
+    if (ALLOWED_EMAILS.length > 0) {
+      return ALLOWED_EMAILS.includes(normalizedEmail);
+    }
     const allowedDomain = normalizeAllowedEmailDomain(securitySettings.allowedEmailDomain);
     return normalizedEmail.endsWith(`@${allowedDomain}`);
   }
@@ -2360,7 +2368,11 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
                     <div className="workspace-login-layout">
                       <AuthPanel
                         session={session}
-                        allowedDomain={normalizeAllowedEmailDomain(securitySettings.allowedEmailDomain)}
+                        allowedDomain={
+                          ALLOWED_EMAILS.length > 0
+                            ? null
+                            : normalizeAllowedEmailDomain(securitySettings.allowedEmailDomain)
+                        }
                       />
                     </div>
                   </section>
@@ -2959,6 +2971,13 @@ function isTransientFetchStatus(message: string) {
     message,
   );
 }
+
+// Exact emails allowed to sign in (comma-separated in VITE_ALLOWED_EMAILS).
+// When set, this overrides the domain-based check entirely.
+const ALLOWED_EMAILS: string[] = (import.meta.env.VITE_ALLOWED_EMAILS ?? "")
+  .split(",")
+  .map((entry: string) => entry.trim().toLowerCase())
+  .filter(Boolean);
 
 function normalizeAllowedEmailDomain(domain: string) {
   return domain.trim().toLowerCase().replace(/^@/u, "") || DEFAULT_SECURITY_SETTINGS.allowedEmailDomain;

@@ -25,13 +25,13 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Domain restriction (mirrors VITE_ALLOWED_DOMAIN / hd hint).
-    // Email is enforced primarily at sign-in; this is defense in depth.
+    // Sign-in restriction. Enforced primarily at sign-in; this is defense in depth.
+    // Restricted to a single allowed account.
     function allowedDomain() {
       return isSignedIn()
         && request.auth.token.email != null
         && request.auth.token.email_verified == true
-        && request.auth.token.email.matches('.*@muhayu[.]com$');
+        && request.auth.token.email.lower() == 'totoriverce@gmail.com';
     }
 
     function isWorkspaceMember(wsId) {

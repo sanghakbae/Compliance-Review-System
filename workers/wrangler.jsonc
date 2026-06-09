@@ -18,7 +18,9 @@
     // Firebase project whose ID tokens this Worker accepts (token `aud`/`iss`).
     "FIREBASE_PROJECT_ID": "compliance-review-system",
     // Email domain restriction, mirrors VITE_ALLOWED_DOMAIN.
-    "ALLOWED_EMAIL_DOMAIN": "muhayu.com"
+    "ALLOWED_EMAIL_DOMAIN": "muhayu.com",
+    // Exact-email allowlist (overrides the domain check when set).
+    "ALLOWED_EMAILS": "totoriverce@gmail.com"
   }
   // Secrets (set via `wrangler secret put`):
   //   OPENAI_API_KEY            — used by classify-revision / analyze-selected-revisions

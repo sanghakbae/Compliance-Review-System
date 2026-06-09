@@ -31,6 +31,8 @@ jobs:
       VITE_FIREBASE_MEASUREMENT_ID: ${{ vars.VITE_FIREBASE_MEASUREMENT_ID }}
       # Cloudflare Worker API base URL.
       VITE_WORKER_API_URL: ${{ vars.VITE_WORKER_API_URL }}
+      # Exact-email sign-in allowlist (comma-separated).
+      VITE_ALLOWED_EMAILS: ${{ vars.VITE_ALLOWED_EMAILS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

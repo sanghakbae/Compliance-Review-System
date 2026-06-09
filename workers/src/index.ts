@@ -30,6 +30,8 @@ export interface Env {
   SOURCE_DOCUMENTS: R2Bucket;
   FIREBASE_PROJECT_ID: string;
   ALLOWED_EMAIL_DOMAIN?: string;
+  /** Comma-separated exact emails allowed to authenticate (overrides domain). */
+  ALLOWED_EMAILS?: string;
   OPENAI_API_KEY?: string;
   /** Google service account JSON for Firestore Admin access. */
   FIREBASE_SERVICE_ACCOUNT?: string;
@@ -48,7 +50,16 @@ async function authenticate(request: Request, env: Env): Promise<VerifiedUser> {
     throw new HttpError(401, "Missing authorization token.");
   }
   try {
-    return await verifyIdToken(token, env.FIREBASE_PROJECT_ID, env.ALLOWED_EMAIL_DOMAIN);
+    const allowedEmails = (env.ALLOWED_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    return await verifyIdToken(
+      token,
+      env.FIREBASE_PROJECT_ID,
+      env.ALLOWED_EMAIL_DOMAIN,
+      allowedEmails,
+    );
   } catch (error) {
     throw new HttpError(401, error instanceof Error ? error.message : "Unauthorized.");
   }

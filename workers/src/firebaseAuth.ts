@@ -93,6 +93,7 @@ export async function verifyIdToken(
   token: string,
   projectId: string,
   allowedDomain?: string,
+  allowedEmails?: string[],
 ): Promise<VerifiedUser> {
   const parts = token.split(".");
   if (parts.length !== 3) {
@@ -143,8 +144,14 @@ export async function verifyIdToken(
   }
 
   const email = typeof claims.email === "string" ? claims.email : null;
-  if (allowedDomain) {
-    if (!email || !email.toLowerCase().endsWith(`@${allowedDomain.toLowerCase()}`)) {
+  const normalizedEmail = email?.toLowerCase() ?? "";
+  // Exact-email allowlist takes precedence over domain matching.
+  if (allowedEmails && allowedEmails.length > 0) {
+    if (!normalizedEmail || !allowedEmails.map((e) => e.toLowerCase()).includes(normalizedEmail)) {
+      throw new Error("Email not allowed.");
+    }
+  } else if (allowedDomain) {
+    if (!normalizedEmail || !normalizedEmail.endsWith(`@${allowedDomain.toLowerCase()}`)) {
       throw new Error("Email domain not allowed.");
     }
   }
