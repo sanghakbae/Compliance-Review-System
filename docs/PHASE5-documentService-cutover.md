@@ -68,9 +68,14 @@
 
 ## 4) 검증 & 폐기 (Phase 6)
 
-1. `wrangler deploy` + `wrangler secret put FIREBASE_SERVICE_ACCOUNT`, `OPENAI_API_KEY`.
-2. `firebase deploy --only firestore:rules,firestore:indexes`.
-3. ETL 실행: `scripts/migration` (import:auth → migrate:data → migrate:storage → verify).
-4. `VITE_WORKER_API_URL`을 배포된 Worker URL로 설정.
-5. 앱 실행 → 로그인/문서/비교/AI 전 기능 확인.
-6. `@supabase/supabase-js` 의존성 + `src/lib/supabaseClient.ts` + `supabase/` 제거.
+운영 도메인: **`https://crs.sanghak.kr`**
+
+1. **Firebase Console → Authentication → Settings → Authorized domains** 에 `crs.sanghak.kr` 추가
+   (없으면 `signInWithPopup` Google 로그인이 `auth/unauthorized-domain`으로 실패).
+2. `wrangler deploy` + `wrangler secret put FIREBASE_SERVICE_ACCOUNT`, `OPENAI_API_KEY`.
+   - Worker CORS는 현재 `*`. 운영 강화 시 `Access-Control-Allow-Origin`을 `https://crs.sanghak.kr`로 제한 (workers/src/cors.ts).
+3. `firebase deploy --only firestore:rules,firestore:indexes`.
+4. ETL 실행: `scripts/migration` (import:auth → migrate:data → migrate:storage → verify).
+5. `VITE_WORKER_API_URL`을 배포된 Worker URL로 설정(앱 빌드 env). 앱은 `crs.sanghak.kr`로 배포.
+6. 앱 실행 → 로그인/문서/비교/AI 전 기능 확인.
+7. `@supabase/supabase-js` 의존성 + `src/lib/supabaseClient.ts` + `supabase/` 제거.
