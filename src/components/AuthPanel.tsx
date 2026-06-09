@@ -1,14 +1,14 @@
 import { useState } from "react";
 import {
-  clearSupabaseAuthStorage,
-  clearAuthLocationArtifacts,
-  getSupabaseClient,
-  normalizeSupabaseAuthError,
-} from "../lib/supabaseClient";
-import type { Session } from "@supabase/supabase-js";
+  signInWithGoogle,
+  signOutUser,
+  clearFirebaseAuthArtifacts,
+  normalizeFirebaseAuthError,
+  type AppAuthSession,
+} from "../lib/firebaseAuth";
 
 interface AuthPanelProps {
-  session: Session | null;
+  session: AppAuthSession | null;
   allowedDomain?: string | null;
 }
 
@@ -24,30 +24,26 @@ export function AuthPanel({ session, allowedDomain = null }: AuthPanelProps) {
     : "로그인 시 사용될 외부 인증 계정입니다.";
 
   async function handleGoogleSignIn() {
-    clearAuthLocationArtifacts();
-    const supabase = getSupabaseClient();
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo,
-        queryParams: allowedDomain
-          ? {
-              hd: allowedDomain,
-            }
-          : undefined,
-      },
-    });
-    setMessage(error ? normalizeSupabaseAuthError(error.message) : "Google 로그인으로 이동합니다.");
+    try {
+      await signInWithGoogle(allowedDomain);
+      setMessage("Google 로그인이 완료되었습니다.");
+    } catch (error) {
+      setMessage(
+        normalizeFirebaseAuthError(error instanceof Error ? error.message : undefined),
+      );
+    }
   }
 
   async function handleSignOut() {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.auth.signOut();
-    if (!error) {
-      clearSupabaseAuthStorage();
+    try {
+      await signOutUser();
+      clearFirebaseAuthArtifacts();
+      setMessage("로그아웃되었습니다.");
+    } catch (error) {
+      setMessage(
+        normalizeFirebaseAuthError(error instanceof Error ? error.message : undefined),
+      );
     }
-    setMessage(error ? normalizeSupabaseAuthError(error.message) : "로그아웃되었습니다.");
   }
 
   return (

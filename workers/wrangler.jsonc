@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "policy-revision-mgmt-system",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // R2 bucket created 2026-06-09 (see docs/MIGRATION.md).
+  "r2_buckets": [
+    {
+      "binding": "SOURCE_DOCUMENTS",
+      "bucket_name": "policy-revision-mgmt-system"
+    }
+  ],
+  "vars": {
+    // Firebase project whose ID tokens this Worker accepts (token `aud`/`iss`).
+    "FIREBASE_PROJECT_ID": "compliance-review-system",
+    // Email domain restriction, mirrors VITE_ALLOWED_DOMAIN.
+    "ALLOWED_EMAIL_DOMAIN": "muhayu.com"
+  }
+  // Secrets (set via `wrangler secret put`):
+  //   OPENAI_API_KEY            — used by classify-revision / analyze-selected-revisions
+  //   FIREBASE_SERVICE_ACCOUNT  — JSON for Firestore Admin access (if using REST/Admin)
+}

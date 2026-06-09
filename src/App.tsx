@@ -45,11 +45,12 @@ import {
   uploadStructuredRowsDocument,
 } from "./lib/documentService";
 import {
-  clearSupabaseAuthStorage,
-  exchangeAuthCodeForSessionIfPresent,
-  getSupabaseClient,
-  hasSupabaseEnv,
-} from "./lib/supabaseClient";
+  signOutUser,
+  clearFirebaseAuthArtifacts,
+  onAppAuthChange,
+  type AppAuthSession,
+} from "./lib/firebaseAuth";
+import { hasFirebaseEnv } from "./lib/firebaseClient";
 import type {
   AiRevisionPromptOverrides,
   ComparisonRunSummary,
@@ -63,7 +64,6 @@ import type {
   WorkspaceFavorite,
   WorkspaceSelectionSnapshot,
 } from "./types";
-import type { Session } from "@supabase/supabase-js";
 
 type NoticeTone = "info" | "success" | "warning" | "danger";
 type PersistedWorkspaceSelection = WorkspaceSelectionSnapshot;
@@ -151,14 +151,12 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
     analysisStagePhase: null,
     analysisStageStartedAt: null,
   };
-  const [session, setSession] = useState<Session | null>(
+  const [session, setSession] = useState<AppAuthSession | null>(
     embeddedWorkspace
-      ? ({
-          user: {
-            id: "portal-guest",
-            email: "portal@local",
-          },
-        } as Session)
+      ? {
+          user: { id: "portal-guest", email: "portal@local" },
+          access_token: "portal-guest",
+        }
       : null,
   );
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -239,7 +237,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
   });
   const lastSessionActivityAtRef = useRef(Date.now());
   const lastSessionActivityRecordAtRef = useRef(0);
-  const isSupabaseConfigured = hasSupabaseEnv();
+  const isSupabaseConfigured = hasFirebaseEnv();
   const sessionUserId = session?.user.id ?? null;
 
   function setAppNotice(nextNotice: AppNotice | null) {
@@ -293,7 +291,8 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
   }
 
   async function rejectDisallowedSession(email?: string | null) {
-    clearSupabaseAuthStorage();
+    await signOutUser().catch(() => undefined);
+    clearFirebaseAuthArtifacts();
     setSession(null);
     setAppNotice({
       tone: "danger",
@@ -321,30 +320,33 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
   }, [reviewExecutionHistory.length]);
 
   async function handleHeaderSignOut() {
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.auth.signOut();
-
-    if (!error) {
-      clearSupabaseAuthStorage();
+    try {
+      await signOutUser();
+      clearFirebaseAuthArtifacts();
+      setAppNotice({
+        tone: "warning",
+        label: "인증 상태",
+        title: "로그아웃되었습니다.",
+        detail: "다시 로그인하기 전까지 업로드와 비교 실행은 비활성화됩니다.",
+        actions: ["Google 로그인을 다시 진행하세요."],
+      });
+    } catch (error) {
+      setAppNotice({
+        tone: "danger",
+        label: "인증 상태",
+        title: "로그아웃에 실패했습니다.",
+        detail: error instanceof Error ? error.message : "잠시 후 다시 시도하세요.",
+        actions: ["잠시 후 다시 시도하세요."],
+      });
     }
-
-    setAppNotice({
-      tone: error ? "danger" : "warning",
-      label: "인증 상태",
-      title: error ? "로그아웃에 실패했습니다." : "로그아웃되었습니다.",
-      detail: error ? error.message : "다시 로그인하기 전까지 업로드와 비교 실행은 비활성화됩니다.",
-      actions: error ? ["잠시 후 다시 시도하세요."] : ["Google 로그인을 다시 진행하세요."],
-    });
   }
 
   useEffect(() => {
     if (embeddedWorkspace) {
       setSession({
-        user: {
-          id: "portal-guest",
-          email: "portal@local",
-        },
-      } as Session);
+        user: { id: "portal-guest", email: "portal@local" },
+        access_token: "portal-guest",
+      });
       setAppNotice({
         tone: "info",
         label: "포털 모드",
@@ -358,156 +360,59 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       setAppNotice({
         tone: "warning",
         label: "설정 필요",
-        title: "Supabase 환경 변수가 비어 있습니다.",
+        title: "Firebase 환경 변수가 비어 있습니다.",
         detail: "인증과 데이터 기능은 비활성화된 상태입니다.",
         actions: [
-          ".env에 VITE_SUPABASE_URL을 설정하세요.",
-          ".env에 VITE_SUPABASE_ANON_KEY를 설정하세요.",
+          ".env에 VITE_FIREBASE_API_KEY를 설정하세요.",
+          ".env에 VITE_FIREBASE_PROJECT_ID를 설정하세요.",
         ],
         debug: ["환경 변수 누락으로 인증/데이터 기능 비활성화"],
       });
       return;
     }
 
-    const supabase = getSupabaseClient();
     let cancelled = false;
 
-    (async () => {
-      try {
-        await exchangeAuthCodeForSessionIfPresent();
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          if (cancelled) {
-            return;
-          }
-          setSession(null);
-          setAppNotice({
-            tone: "danger",
-            label: "인증 오류",
-            title: "세션을 확인하지 못했습니다.",
-            detail: error.message,
-            actions: ["Supabase 프로젝트 URL과 키를 확인하세요.", "로그인 상태를 새로 고침한 뒤 다시 시도하세요."],
-            debug: [`auth.getSession 오류: ${error.message}`],
-          });
-          return;
-        }
-
-        if (data.session) {
-          const {
-            data: { user },
-            error: userError,
-          } = await supabase.auth.getUser(data.session.access_token);
-
-          if (userError || !user) {
-            if (cancelled) {
-              return;
-            }
-            clearSupabaseAuthStorage();
-            setSession(null);
-            setAppNotice({
-              tone: "warning",
-              label: "인증 복구 필요",
-              title: "저장된 로그인 세션이 유효하지 않아 초기화했습니다.",
-              detail: "다시 로그인해야 삭제, 재파싱, 비교 실행이 동작합니다.",
-              actions: ["Google로 다시 로그인하세요.", "필요하면 세션 강제 초기화를 다시 실행하세요."],
-              debug: [`startup auth validation failed: ${userError?.message ?? "Invalid JWT"}`],
-            });
-            return;
-          }
-
-          if (!isAllowedEmailDomain(user.email)) {
-            if (cancelled) {
-              return;
-            }
-            await rejectDisallowedSession(user.email);
-            return;
-          }
-        }
-
-        if (cancelled) {
-          return;
-        }
-
-        setSession(data.session);
-        setAppNotice(
-          data.session
-            ? {
-                tone: "success",
-                label: "인증 상태",
-                title: "인증되었습니다.",
-                detail: "문서 업로드, 법령 선택, 비교 실행을 진행할 수 있습니다.",
-                actions: ["문서를 업로드하거나 기존 문서를 선택하세요.", "좌우 그룹을 구성한 뒤 비교를 실행하세요."],
-                debug: ["초기 세션 확인 완료", `user=${data.session.user.email ?? "unknown"}`],
-              }
-            : {
-                tone: "info",
-                label: "인증 대기",
-                title: "로그인 후 계속 진행하세요.",
-                detail: "현재 화면은 보이지만 업로드와 비교 실행은 잠겨 있습니다.",
-                actions: ["Google 로그인으로 인증하세요."],
-                debug: ["인증 세션 없음"],
-              },
-        );
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        const message =
-          error instanceof Error ? error.message : "OAuth 세션 교환 중 오류가 발생했습니다.";
-        setSession(null);
-        setAppNotice({
-          tone: "danger",
-          label: "인증 오류",
-          title: "로그인 세션을 복원하지 못했습니다.",
-          detail: message,
-          actions: ["Google 로그인을 다시 진행하세요.", "필요하면 세션 강제 초기화를 실행하세요."],
-          debug: [`auth bootstrap error=${message}`],
-        });
+    // Firebase fires this once with the restored user (or null) on init, and
+    // again on every sign-in / sign-out / token refresh — replacing both the
+    // Supabase getSession bootstrap and onAuthStateChange subscription.
+    const unsubscribe = onAppAuthChange(async (nextSession) => {
+      if (cancelled) {
+        return;
       }
-    })();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
-      if (event === "SIGNED_OUT") {
-        clearSupabaseAuthStorage();
+      if (!nextSession) {
         setSession(null);
         setAppNotice({
-          tone: "warning",
-          label: "인증 상태",
-          title: "로그아웃되었습니다.",
-          detail: "다시 로그인하기 전까지 업로드와 비교 실행은 비활성화됩니다.",
-          actions: ["Google 로그인을 다시 진행하세요."],
-          debug: ["SIGNED_OUT 이벤트 처리 완료", "현재 세션 없음"],
+          tone: "info",
+          label: "인증 대기",
+          title: "로그인 후 계속 진행하세요.",
+          detail: "현재 화면은 보이지만 업로드와 비교 실행은 잠겨 있습니다.",
+          actions: ["Google 로그인으로 인증하세요."],
+          debug: ["인증 세션 없음"],
         });
         return;
       }
 
-      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
-        if (nextSession?.user && !isAllowedEmailDomain(nextSession.user.email)) {
-          await rejectDisallowedSession(nextSession.user.email);
-          return;
-        }
-        setSession(nextSession);
-        setAppNotice({
-          tone: "success",
-          label: "인증 상태",
-          title: "인증되었습니다.",
-          detail: "세션이 준비되었습니다.",
-          debug: [`auth event=${event}`, `user=${nextSession?.user.email ?? "unknown"}`],
-        });
+      if (!isAllowedEmailDomain(nextSession.user.email)) {
+        await rejectDisallowedSession(nextSession.user.email);
         return;
       }
 
-      if (event === "TOKEN_REFRESHED") {
-        setSession(nextSession);
-      }
+      setSession(nextSession);
+      setAppNotice({
+        tone: "success",
+        label: "인증 상태",
+        title: "인증되었습니다.",
+        detail: "문서 업로드, 법령 선택, 비교 실행을 진행할 수 있습니다.",
+        actions: ["문서를 업로드하거나 기존 문서를 선택하세요.", "좌우 그룹을 구성한 뒤 비교를 실행하세요."],
+        debug: ["인증 세션 확인 완료", `user=${nextSession.user.email ?? "unknown"}`],
+      });
     });
 
     return () => {
       cancelled = true;
-      subscription.unsubscribe();
+      unsubscribe();
     };
   }, [embeddedWorkspace, isSupabaseConfigured, securitySettings.allowedEmailDomain]);
 
@@ -524,7 +429,6 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       return;
     }
 
-    const supabase = getSupabaseClient();
     const sessionIdleTimeoutMinutes = normalizeSessionIdleTimeoutMinutes(
       securitySettings.sessionIdleTimeoutMinutes,
     );
@@ -549,8 +453,8 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       }
 
       timeoutHandled = true;
-      await supabase.auth.signOut();
-      clearSupabaseAuthStorage();
+      await signOutUser().catch(() => undefined);
+      clearFirebaseAuthArtifacts();
       setSession(null);
       setAppNotice({
         tone: "warning",
@@ -3499,9 +3403,9 @@ function getWorkspaceDataRequirements(section: WorkspaceSection): WorkspaceDataL
   }
 }
 
-function getUploadDisabledReason(session: Session | null, isSupabaseConfigured: boolean) {
+function getUploadDisabledReason(session: AppAuthSession | null, isSupabaseConfigured: boolean) {
   if (!isSupabaseConfigured) {
-    return "Supabase 환경 변수가 없어 업로드를 시작할 수 없습니다.";
+    return "Firebase 환경 변수가 없어 업로드를 시작할 수 없습니다.";
   }
   if (!session) {
     return "로그인 후에만 문서 업로드와 파싱을 실행할 수 있습니다.";
@@ -3683,9 +3587,9 @@ function buildAiReportHistoryTitle(selectionCounts: {
   return `비교 대상 ${selectionCounts.leftDocumentCount}건 · 기준 문서 ${selectionCounts.rightDocumentCount}건 · 법령 ${selectionCounts.rightLawCount}건`;
 }
 
-function getComparisonDisabledReason(session: Session | null, isSupabaseConfigured: boolean) {
+function getComparisonDisabledReason(session: AppAuthSession | null, isSupabaseConfigured: boolean) {
   if (!isSupabaseConfigured) {
-    return "Supabase 환경 변수가 없어 비교 기능이 잠겨 있습니다.";
+    return "Firebase 환경 변수가 없어 비교 기능이 잠겨 있습니다.";
   }
   if (!session) {
     return "로그인 후에만 비교 실행과 법령 변경 작업을 수행할 수 있습니다.";

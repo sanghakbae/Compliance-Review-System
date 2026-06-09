@@ -1,0 +1,135 @@
+rules_version = '2';
+
+// Firestore Security Rules — translated from the Supabase Postgres RLS policies.
+// Token = Firebase ID token (request.auth). request.auth.uid replaces auth.uid().
+//
+// Model summary (see src/lib/firestore/schema.ts):
+//   workspaces/{wsId}                 (memberIds[] denormalized for membership checks)
+//     members/{uid}
+//   documents/{docId}                 (ownerUserId, workspaceId)
+//     versions/{verId}
+//       sections/{secId}
+//   lawSources/{lawId}/versions/{verId}/sections/{secId}
+//   comparisonRuns/{runId}/results/{resultId}, /decisions/{decId}
+//   users/{uid}/...   (per-user settings/favorites/history)
+//   auditLogs/{logId} (append-only)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Domain restriction (mirrors VITE_ALLOWED_DOMAIN / hd hint).
+    // Email is enforced primarily at sign-in; this is defense in depth.
+    function allowedDomain() {
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@muhayu[.]com$');
+    }
+
+    function isWorkspaceMember(wsId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/workspaces/$(wsId)/members/$(request.auth.uid));
+    }
+
+    // ---- workspaces ----
+    match /workspaces/{wsId} {
+      allow read: if isWorkspaceMember(wsId) || isOwner(resource.data.ownerUserId);
+      allow create: if allowedDomain() && isOwner(request.resource.data.ownerUserId);
+      allow update, delete: if isOwner(resource.data.ownerUserId);
+
+      match /members/{memberUid} {
+        allow read: if isWorkspaceMember(wsId);
+        // Only the workspace owner manages membership.
+        allow write: if isOwner(get(/databases/$(database)/documents/workspaces/$(wsId)).data.ownerUserId);
+      }
+    }
+
+    // ---- documents (+ versions + sections) ----
+    match /documents/{docId} {
+      function docOwner() { return resource.data.ownerUserId; }
+      allow read: if isOwner(docOwner())
+        || (resource.data.workspaceId != null && isWorkspaceMember(resource.data.workspaceId));
+      allow create: if allowedDomain() && isOwner(request.resource.data.ownerUserId);
+      allow update, delete: if isOwner(docOwner());
+
+      function parentDocOwner() {
+        return get(/databases/$(database)/documents/documents/$(docId)).data.ownerUserId;
+      }
+
+      match /versions/{verId} {
+        allow read: if isOwner(parentDocOwner());
+        allow write: if isOwner(parentDocOwner());
+
+        match /sections/{secId} {
+          allow read: if isOwner(parentDocOwner());
+          allow write: if isOwner(parentDocOwner());
+        }
+      }
+    }
+
+    // ---- law sources (+ versions + sections) ----
+    match /lawSources/{lawId} {
+      function lawOwner() { return resource.data.ownerUserId; }
+      allow read: if isOwner(lawOwner())
+        || (resource.data.workspaceId != null && isWorkspaceMember(resource.data.workspaceId));
+      allow create: if allowedDomain() && isOwner(request.resource.data.ownerUserId);
+      allow update, delete: if isOwner(lawOwner());
+
+      function parentLawOwner() {
+        return get(/databases/$(database)/documents/lawSources/$(lawId)).data.ownerUserId;
+      }
+
+      match /versions/{verId} {
+        allow read, write: if isOwner(parentLawOwner());
+        match /sections/{secId} {
+          allow read, write: if isOwner(parentLawOwner());
+        }
+      }
+    }
+
+    // ---- comparison runs (+ results + decisions) ----
+    match /comparisonRuns/{runId} {
+      function runActor() { return resource.data.actorUserId; }
+      allow read, update, delete: if isOwner(runActor());
+      allow create: if allowedDomain() && isOwner(request.resource.data.actorUserId);
+
+      function parentRunActor() {
+        return get(/databases/$(database)/documents/comparisonRuns/$(runId)).data.actorUserId;
+      }
+      match /results/{resultId} {
+        allow read, write: if isOwner(parentRunActor());
+      }
+      match /decisions/{decId} {
+        allow read, write: if isOwner(parentRunActor());
+      }
+    }
+
+    // ---- per-user data: settings, favorites, history ----
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ---- audit logs: append-only, actor reads own ----
+    match /auditLogs/{logId} {
+      allow read: if isOwner(resource.data.actorUserId);
+      allow create: if allowedDomain() && isOwner(request.resource.data.actorUserId);
+      allow update, delete: if false;
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
