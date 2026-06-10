@@ -697,7 +697,7 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
           label: "부분 로드 오류",
           title: "현재 메뉴 데이터 일부를 불러오지 못했습니다.",
           detail: `${loadErrors.join("\n")}\n로드 시간: ${loadDurationMs}ms`,
-          actions: ["필요한 메뉴에 진입할 때 데이터만 다시 불러옵니다.", "인증 상태와 Supabase 연결을 확인하세요."],
+          actions: ["필요한 메뉴에 진입할 때 데이터만 다시 불러옵니다.", "인증 상태와 서버(Worker) 연결을 확인하세요."],
           debug: [...loadErrors, `lazy workspace load=${loadDurationMs}ms`, `section=${activeWorkspaceSection}`],
         });
       }
@@ -2362,10 +2362,10 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
                 {!showWorkspaceNavigation && !isSupabaseConfigured ? null : !isSupabaseConfigured ? (
                   <section className="panel">
                     <div className="warning-card">
-                      <strong>Supabase 설정이 필요합니다</strong>
+                      <strong>Firebase 설정이 필요합니다</strong>
                       <p>
                         `.env.example`를 기준으로 `.env`를 만든 뒤
-                        `VITE_SUPABASE_URL`과 `VITE_SUPABASE_ANON_KEY`를 설정하세요.
+                        `VITE_FIREBASE_API_KEY`와 `VITE_FIREBASE_PROJECT_ID`를 설정하세요.
                       </p>
                       <p className="helper-text">
                         지금은 화면만 로컬에서 보이는 상태이며, 해당 값이 없으면
@@ -2954,7 +2954,7 @@ function inferNoticeTone(message: string): NoticeTone {
 
 function inferNoticeDetail(message: string) {
   if (/Failed to fetch/.test(message)) {
-    return "브라우저가 Supabase Edge Function에 일시적으로 연결하지 못했습니다. 네트워크, 세션, 웹뷰 연결 상태를 확인한 뒤 다시 시도하세요.";
+    return "브라우저가 서버(Worker)에 일시적으로 연결하지 못했습니다. 네트워크, 세션, 웹뷰 연결 상태를 확인한 뒤 다시 시도하세요.";
   }
   if (/선택하세요/.test(message)) {
     return "필수 입력이 없어서 다음 단계로 진행하지 못했습니다.";

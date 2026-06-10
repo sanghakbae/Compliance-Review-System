@@ -62,6 +62,12 @@ async function main(): Promise<void> {
   const db = firestore();
   const w = new Batcher(db);
 
+  // When set, reassign ALL ownership (ownerUserId / actorUserId / per-user docs)
+  // to this Firebase uid. Used to consolidate legacy multi-user Supabase data
+  // onto the single allowed account.
+  const OWNER = process.env.OWNER_OVERRIDE_UID || null;
+  if (OWNER) log(`owner override active → ${OWNER}`);
+
   // 1) workspaces + members
   const workspaces = await fetchAll(sb, "policy_workspaces");
   const members = await fetchAll(sb, "policy_workspace_members");
@@ -86,7 +92,7 @@ async function main(): Promise<void> {
   // 2) documents + versions + sections
   const documents = await fetchAll(sb, "policy_documents");
   const docOwnerById = new Map<string, string>();
-  for (const d of documents) docOwnerById.set(d.id, d.owner_user_id);
+  for (const d of documents) docOwnerById.set(d.id, OWNER ?? d.owner_user_id);
 
   const docVersions = await fetchAll(sb, "policy_document_versions");
   const docIdByVersion = new Map<string, string>();
@@ -110,6 +116,7 @@ async function main(): Promise<void> {
     const latest = latestByDoc.get(d.id);
     await w.set(`documents/${d.id}`, {
       ...rowToFields(d, { omit: ["id"] }),
+      ...(OWNER ? { ownerUserId: OWNER } : {}),
       latest: latest
         ? {
             versionId: latest.id,
@@ -144,7 +151,7 @@ async function main(): Promise<void> {
   // 3) law sources + versions + sections
   const lawSources = await fetchAll(sb, "policy_law_sources");
   const lawOwnerById = new Map<string, string>();
-  for (const l of lawSources) lawOwnerById.set(l.id, l.owner_user_id);
+  for (const l of lawSources) lawOwnerById.set(l.id, OWNER ?? l.owner_user_id);
 
   const lawVersions = await fetchAll(sb, "policy_law_versions");
   const lawIdByVersion = new Map<string, string>();
@@ -153,7 +160,10 @@ async function main(): Promise<void> {
   const lawSections = await fetchAll(sb, "policy_law_sections");
 
   for (const l of lawSources) {
-    await w.set(`lawSources/${l.id}`, rowToFields(l, { omit: ["id"] }));
+    await w.set(`lawSources/${l.id}`, {
+      ...rowToFields(l, { omit: ["id"] }),
+      ...(OWNER ? { ownerUserId: OWNER } : {}),
+    });
   }
   for (const v of lawVersions) {
     await w.set(`lawSources/${v.law_source_id}/versions/${v.id}`, {
@@ -178,7 +188,10 @@ async function main(): Promise<void> {
   // 4) comparison runs + results + decisions
   const runs = await fetchAll(sb, "policy_comparison_runs");
   for (const r of runs) {
-    await w.set(`comparisonRuns/${r.id}`, rowToFields(r, { omit: ["id"] }));
+    await w.set(`comparisonRuns/${r.id}`, {
+      ...rowToFields(r, { omit: ["id"] }),
+      ...(OWNER ? { actorUserId: OWNER } : {}),
+    });
   }
   for (const r of await fetchAll(sb, "policy_comparison_results")) {
     await w.set(`comparisonRuns/${r.comparison_run_id}/results/${r.id}`, rowToFields(r, {
@@ -193,32 +206,35 @@ async function main(): Promise<void> {
 
   // 5) audit logs
   for (const a of await fetchAll(sb, "policy_audit_logs")) {
-    await w.set(`auditLogs/${a.id}`, rowToFields(a, { omit: ["id"] }));
+    await w.set(`auditLogs/${a.id}`, {
+      ...rowToFields(a, { omit: ["id"] }),
+      ...(OWNER ? { actorUserId: OWNER } : {}),
+    });
   }
 
-  // 6) per-user data
+  // 6) per-user data (keyed by the override uid when consolidating)
   for (const s of await fetchAll(sb, "policy_user_settings")) {
-    await w.set(`users/${s.owner_user_id}/settings/openai`, rowToFields(s, {
+    await w.set(`users/${OWNER ?? s.owner_user_id}/settings/openai`, rowToFields(s, {
       omit: ["owner_user_id"],
     }));
   }
   for (const s of await fetchAll(sb, "policy_security_settings")) {
-    await w.set(`users/${s.owner_user_id}/settings/security`, rowToFields(s, {
+    await w.set(`users/${OWNER ?? s.owner_user_id}/settings/security`, rowToFields(s, {
       omit: ["owner_user_id"],
     }));
   }
   for (const f of await fetchAll(sb, "policy_workspace_favorites")) {
-    await w.set(`users/${f.owner_user_id}/favorites/${f.id}`, rowToFields(f, {
+    await w.set(`users/${OWNER ?? f.owner_user_id}/favorites/${f.id}`, rowToFields(f, {
       omit: ["id", "owner_user_id"],
     }));
   }
   for (const h of await fetchAll(sb, "policy_review_execution_history")) {
-    await w.set(`users/${h.owner_user_id}/reviewHistory/${h.id}`, rowToFields(h, {
+    await w.set(`users/${OWNER ?? h.owner_user_id}/reviewHistory/${h.id}`, rowToFields(h, {
       omit: ["id", "owner_user_id"],
     }));
   }
   for (const r of await fetchAll(sb, "policy_ai_report_history")) {
-    await w.set(`users/${r.owner_user_id}/aiReportHistory/${r.id}`, rowToFields(r, {
+    await w.set(`users/${OWNER ?? r.owner_user_id}/aiReportHistory/${r.id}`, rowToFields(r, {
       omit: ["id", "owner_user_id"],
     }));
   }
