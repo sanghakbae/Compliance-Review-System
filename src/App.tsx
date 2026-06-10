@@ -1827,7 +1827,10 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       const comparisonItems = await listComparisonRuns();
       setComparisonRuns(comparisonItems);
       const comparisonRunIds = results
-        .map((item) => item?.data?.comparisonRunId)
+        .map(
+          (item) =>
+            (item as { data?: { comparisonRunId?: unknown } } | null)?.data?.comparisonRunId,
+        )
         .filter((value): value is string => typeof value === "string");
       let reviewHistorySaveWarning: string | null = null;
       try {
@@ -1848,7 +1851,11 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
             : "검토 실행 이력을 데이터베이스에 저장하지 못했습니다.";
       }
       const comparisonRunId =
-        results[0]?.data?.comparisonRunId ??
+        (() => {
+          const first = (results[0] as { data?: { comparisonRunId?: unknown } } | undefined)?.data
+            ?.comparisonRunId;
+          return typeof first === "string" ? first : null;
+        })() ??
         comparisonItems[0]?.id ??
         null;
       setSelectedComparisonRunId(comparisonRunId);
