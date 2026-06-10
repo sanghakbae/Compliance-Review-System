@@ -159,6 +159,9 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
         }
       : null,
   );
+  // False until Firebase has restored auth state at least once. Prevents the
+  // login screen from flashing on refresh while the session is being restored.
+  const [authResolved, setAuthResolved] = useState(embeddedWorkspace);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [comparisonRuns, setComparisonRuns] = useState<ComparisonRunSummary[]>([]);
   const [lawVersions, setLawVersions] = useState<LawVersionSummary[]>([]);
@@ -388,6 +391,8 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
       if (cancelled) {
         return;
       }
+      // Auth state is now known (signed in or out) — safe to render the real UI.
+      setAuthResolved(true);
 
       if (!nextSession) {
         setSession(null);
@@ -2370,7 +2375,13 @@ export default function App({ embeddedContext }: { embeddedContext?: { project?:
                   </section>
                 ) : null}
 
-                {!showWorkspaceNavigation ? (
+                {!authResolved && !embeddedWorkspace ? (
+                  <section className="panel panel-equal-height workspace-body-card workspace-login-page">
+                    <div className="workspace-login-layout">
+                      <p className="helper-text">인증 상태를 확인하는 중입니다…</p>
+                    </div>
+                  </section>
+                ) : !showWorkspaceNavigation ? (
                   <section className="panel panel-equal-height workspace-body-card workspace-login-page">
                     <div className="workspace-login-layout">
                       <AuthPanel
